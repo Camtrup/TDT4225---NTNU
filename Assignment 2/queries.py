@@ -73,7 +73,7 @@ class Queries:
 
     ## Query 6: Find activities that are registered multiple times. You should find the query even if it gives zero result.
     def q6(self):
-        query = 'SELECT activity_id, COUNT(*) as count FROM TrackPoint GROUP BY activity_id HAVING count > 1'
+        query = 'SELECT id FROM Activity GROUP BY id HAVING COUNT(*) > 1'
 
         self.cursor.execute(query)
         result = self.cursor.fetchall()
@@ -81,7 +81,23 @@ class Queries:
         print("Activities that are registered multiple times:")
         for row in result:
             print("Activity: " + str(row[0]) + ", Number of times registered: " + str(row[1]))
+
+
+    # Query 7: 
+    # a) Find the number of users that have started an activity in one day and ended the activity the next day. 
+    # b) List the transportation mode, user id and duration for these activities.
+    def q7(self):
+        query = 'SELECT transportation_mode, user_id, TIMESTAMPDIFF(MINUTE, start_date_time, end_date_time) as duration FROM Activity WHERE start_date_time < end_date_time AND DATE(start_date_time) != DATE(end_date_time)'
+
+        self.cursor.execute(query)
+        result = self.cursor.fetchall()
+
+        print("Users that have started an activity in one day and ended the activity the next day (duration is in minutes):")
+        for row in result:
+            print("Transportation mode: " + str(row[0]) + ", User id: " + str(row[1]) + ", Duration: " + str(row[2]))
     
+    # Query 8: Find the number of users which have been close to each other in time and space.
+    # Close is defined as the same space (50 meters) and for the same half minute (30seconds)
 
     
     
@@ -101,6 +117,8 @@ def main():
         q.q5()
         print("\n\nQuery 6:")
         q.q6()
+        print("\n\nQuery 7:")
+        q.q7()
 
     except Exception as e:
         print("Error: ", e)
