@@ -1,4 +1,4 @@
-import DbConnector
+from DbConnector import DbConnector
 from tabulate import tabulate
 from datetime import datetime as dt
 import os;
@@ -12,7 +12,8 @@ class DBSetup:
 
     def create_tabel_User(self):
         query = """CREATE TABLE IF NOT EXISTS User (
-                    id INT AUTO_INCREMENT NOT NULL PRIMARY KEY)
+                    id INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
+                    has_labels BOOLEAN)
                 """
         self.cursor.execute(query)
         self.db_connection.commit()
@@ -58,7 +59,10 @@ class DBSetup:
         for user in users:
             activities = []
             trackpoints = []
-            query = "INSERT INTO User (id) VALUES (NULL)"
+
+            has_labels = user in users_with_labels
+
+            query = "INSERT INTO User (id, has_labels) VALUES (NULL, %s)" % (has_labels)
 
             self.cursor.execute(query)
 
@@ -84,7 +88,7 @@ class DBSetup:
 
                     transportation_mode = "NULL"
 
-                    if user in users_with_labels:
+                    if has_labels:
                         with open("dataset/dataset/Data/" + user + "/labels.txt") as labels_file:
                             for line in labels_file.readlines()[1:]:
                                 activity_start_raw = line.split("\t")[0].replace("/", "-")
@@ -126,9 +130,8 @@ class DBSetup:
         rows = self.cursor.fetchall()
         print(tabulate(rows, headers=self.cursor.column_names))
 
-def main(args=None):
+def main():
     program = None
-    print(args)
     try:
         program = DBSetup()
         program.drop_all_tables()
