@@ -1,6 +1,7 @@
 from DbConnector import DbConnector
 from datetime import timedelta
 from haversine import haversine, Unit
+from collections import defaultdict
 
 class Queries:
     def __init__(self):
@@ -135,25 +136,25 @@ class Queries:
                     if haversine((rowone[2], rowone[3]), (rowtwo[2], rowtwo[3]), unit=Unit.METERS) < 50:
                         been_close.add((rowone[6], rowtwo[6]))
                         been_close.add((rowtwo[6], rowone[6]))
-                        
+
         count = len(been_close) / 2
 
         print("Users which have been close to each other in time and space:")
         print("Number of users: " + str(count))
 
     # Query 9: Find the top 15 users who have gained the most altitude meters.
+    # Invalid altitude values must be ignored. They are represented as -777 in the database.
     def q9(self):
-        query = """SELECT Sub.UserID, Sub.AltitudeGained 
-            FROM ( 
-                SELECT Activity.user_id AS userID, 
-                       SUM(CASE WHEN TP1.altitude != -777 AND TP2.altitude != -777 
-                       THEN (TP2.altitude - TP1.altitude) * 0.0003048 ELSE 0 END) AS AltitudeGained 
-                FROM   TrackPoint AS TP1 INNER JOIN TrackPoint AS TP2 ON TP1.activity_id=TP2.activity_id AND 
-                       TP1.id+1 = TP2.id INNER JOIN Activity ON Activity.id = TP1.activity_id AND Activity.id = TP2.activity_id 
-                WHERE  TP2.altitude > TP1.altitude 
-                GROUP  BY Activity.user_id 
-                ) AS Sub 
-            ORDER BY AltitudeGained DESC LIMIT 15
+        query = """SELECT user_id, SUM(altitude) * 0.0003048 AS altitude_sum
+            FROM (
+                SELECT user_id, activity_id, altitude
+                FROM Activity, TrackPoint
+                WHERE Activity.id = TrackPoint.activity_id
+                    AND altitude != -777
+            ) AS altitudes
+            GROUP BY user_id
+            ORDER BY altitude_sum DESC
+            LIMIT 15
             """
 
         self.cursor.execute(query)
@@ -161,54 +162,94 @@ class Queries:
 
         print("Top 15 users who have gained the most altitude meters:")
         for row in result:
-            print("User: " + str(row[0]) + ", Altitude gain: " + str(row[1]))
-    
+            print("User id: " + str(row[0]) + ", Altitude sum: " + str(row[1]))
 
     # Query 10: Find the users that have traveled the longest total distance in one day for each
-    # transportation mode.
+    # transportation mode. 
     def q10(self):
-        query = """SELECT transportation_mode, user_id, SUM(distance) AS total_distance
-            FROM (
-                SELECT transportation_mode, user_id, activity_id, 
-                    SUM(ST_Distance_Sphere(POINT(t1.lat, t1.lon), POINT(t2.lat, t2.lon))) AS distance
-                FROM Activity, TrackPoint AS t1, TrackPoint AS t2
-                WHERE Activity.id = t1.activity_id AND Activity.id = t2.activity_id
-                    AND DATE(t1.date) = DATE(t2.date)
-                    AND t1.date < t2.date
-                GROUP BY transportation_mode, user_id, activity_id
-            ) AS distances
-            GROUP BY transportation_mode, user_id
-            ORDER BY total_distance DESC
-            """
+        # Hashmap for each transportation mode and a tuple with the user id and the distance
+        # {transportation_mode: (user_id, distance)}
+        transportation_mode_distance = defaultdict(lambda: (0, 0))
+
+        query ="""SELECT id FROM User"""
 
         self.cursor.execute(query)
-        result = self.cursor.fetchall()
+        users = self.cursor.fetchall()
+
+        for user in users:
+            query = """SELECT id, transportation_mode FROM Activity WHERE user_id = %s AND transportation_mode NOT LIKE 'NULL'"""
+
+            self.cursor.execute(query, (user[0],))
+            activities = self.cursor.fetchall()
+
+            for activity in activities:
+                query = """SELECT lat, lon, date FROM TrackPoint WHERE activity_id = %s"""
+
+                self.cursor.execute(query, (activity[0],))
+                trackpoints = self.cursor.fetchall()
+
+                distance = 0
+                # Add the distance between trackpoints on the same day
+                for i in range(len(trackpoints) - 1):
+                    if trackpoints[i][2].date() == trackpoints[i + 1][2].date():
+                        distance += haversine((trackpoints[i][0], trackpoints[i][1]), (trackpoints[i + 1][0], trackpoints[i + 1][1]), unit=Unit.METERS)
+                    else:
+                        distance = 0;
+                    
+                    if distance > transportation_mode_distance[activity[1]][1]:
+                        transportation_mode_distance[activity[1]] = (user[0], distance)
 
         print("Users that have traveled the longest total distance in one day for each transportation mode:")
-        for row in result:
-            print("Transportation mode: " + str(row[0]) + ", User id: " + str(row[1]) + ", Total distance: " + str(row[2]))
+        for key, value in transportation_mode_distance.items():
+            print("Transportation mode: " + str(key) + ", User id: " + str(value[0]) + ", Distance: " + str(value[1]))
+
 
     # Query 11: Find all users who have invalid activities, and the number of invalid activities per user.
     # An invalid activity is an activity with consecutive trackpoints where the timestamps deviate with
     # at least 5 minutes.
     def q11(self):
-        query = """SELECT user_id, COUNT(*) AS invalid_activities
-            FROM (
-                SELECT user_id, activity_id, t1.date AS date1, t2.date AS date2
-                FROM Activity, TrackPoint AS t1, TrackPoint AS t2
-                WHERE Activity.id = t1.activity_id AND Activity.id = t2.activity_id
-                    AND t1.date < t2.date
-                    AND t1.date > DATE_SUB(t2.date, INTERVAL 5 MINUTE)
-            ) AS invalid_activity
-            GROUP BY user_id
-            """
+        # query = """SELECT user_id, COUNT(DISTINCT a.id) AS number_of_invalid_activities
+        #         FROM Activity a
+        #         JOIN TrackPoint t1 ON a.id = t1.activity_id
+        #         JOIN TrackPoint t2 ON a.id = t2.activity_id AND t1.id < t2.id
+        #         WHERE TIMESTAMPDIFF(MINUTE, t1.date, t2.date) >= 5
+        #         GROUP BY user_id;
+        #     """
+
+        # self.cursor.execute(query)
+        # result = self.cursor.fetchall()
+
+        # print("Users who have invalid activities, and the number of invalid activities per user:")
+        # for row in result:
+        #     print("User id: " + str(row[0]) + ", Number of invalid activities: " + str(row[1]))
+
+        query = """SELECT id from User"""
 
         self.cursor.execute(query)
-        result = self.cursor.fetchall()
+        users = self.cursor.fetchall()
 
+        invalid_activities = defaultdict(int)
+
+        for user in users:
+            query = """SELECT id from Activity WHERE user_id = %s"""
+
+            self.cursor.execute(query, (user[0],))
+            activities = self.cursor.fetchall()
+
+            for activity in activities:
+                query = """SELECT date FROM TrackPoint WHERE activity_id = %s ORDER BY date"""
+
+                self.cursor.execute(query, (activity[0],))
+                trackpoints = self.cursor.fetchall()
+
+                for i in range(len(trackpoints) - 1):
+                    if trackpoints[i][0] + timedelta(minutes=5) < trackpoints[i + 1][0]:
+                        invalid_activities[user[0]] += 1
+                        break
+        
         print("Users who have invalid activities, and the number of invalid activities per user:")
-        for row in result:
-            print("User id: " + str(row[0]) + ", Number of invalid activities: " + str(row[1]))
+        for key, value in invalid_activities.items():
+            print("User id: " + str(key) + ", Number of invalid activities: " + str(value))
 
     # Query 12: Find all users who have registered transportation_mode and their most used
     # transportation_mode. The answer should be on format (user_id,
@@ -218,15 +259,20 @@ class Queries:
     # to include in your answer (choose one).
     # Do not count the rows where the mode is null.
     def q12(self):
-        query = """SELECT user_id, transportation_mode
-            FROM (
-                SELECT user_id, transportation_mode, COUNT(*) AS count
+        query = """WITH TransportationCounts AS (
+                SELECT user_id, transportation_mode, COUNT(*) as count_mode
                 FROM Activity
-                WHERE transportation_mode IS NOT NULL
+                WHERE transportation_mode NOT LIKE 'NULL'
                 GROUP BY user_id, transportation_mode
-                ORDER BY count DESC
-            ) AS most_used
-            GROUP BY user_id
+            )
+
+            SELECT user_id, transportation_mode
+            FROM (
+                SELECT user_id, transportation_mode, count_mode,
+                    RANK() OVER(PARTITION BY user_id ORDER BY count_mode DESC) as rnk
+                FROM TransportationCounts
+            ) AS RankedModes
+            WHERE rnk = 1;
             """
 
         self.cursor.execute(query)
