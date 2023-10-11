@@ -10,7 +10,7 @@ class DBSetup:
         self.cursor = self.connection.cursor
 
 
-    def create_tabel_User(self):
+    def create_table_User(self):
         query = """CREATE TABLE IF NOT EXISTS User (
                     id INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
                     has_labels BOOLEAN)
@@ -136,7 +136,7 @@ def main():
         program = DBSetup()
         program.drop_all_tables()
         print("Dropped all tables")
-        program.create_tabel_User()
+        program.create_table_User()
         print("Created User table")
         program.create_table_Activity()
         print("Created Activity table")
