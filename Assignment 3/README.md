@@ -1,7 +1,12 @@
 ## Project setup and configuration
 
-Before we begin, we'll create a virtual Python environment to isolate the project from the rest of the globally-installed Python packages. We'll use the venv package, which comes with your Python installation. Execute the following command from the terminal:
+### docker setup
+```bash
+docker pull mongo
+docker run -d -p 27017:27017 --name storedist mongo
+```
 
+### python setup
 ```Bash
 #install python 3.12.0 if not already installed
 brew install pyenv
@@ -11,13 +16,12 @@ pyenv global 3.12.0
 python3.12 -m venv myenv
 source myenv/bin/activate  
 
-python -m pip install 'pymongo[srv]' python-dotenv
+python -m pip install pymongo
 ```
 
-Send a message to mattis for getting a mongodb user and password. 
+### setup the database
 
-.env file:
-```.env
-ATLAS_URI=mongodb+srv://<username>:<password>@cluster1.lqlql.mongodb.net/?retryWrites=true&w=majority
-DB_NAME=stroedist
-``````
+when docker is running
+```Bash
+python setup_db.py
+```
