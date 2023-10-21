@@ -11,6 +11,7 @@ client = MongoClient(uri, port)
 print("Connected to the database")
 
 db = client[db_name]
+print(db)
 # Send a ping to confirm a successful connectiontry:
 try:
     print("Users:", db["User"].count_documents({}))

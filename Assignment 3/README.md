@@ -25,3 +25,11 @@ when docker is running
 ```Bash
 python setup_db.py
 ```
+
+
+## Running the application
+
+```Bash
+. myenv/bin/activate.fish
+python queries.py
+``` 

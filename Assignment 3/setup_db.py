@@ -70,14 +70,14 @@ class DBSetup:
         date_format = "%Y-%m-%d %H:%M:%S"
 
         users.sort()
-        num_users = 3
+        num_users = len(users)
         for i in tqdm(range(num_users)):
             user = users[i]
             if user[0] == ".":
                 continue
 
-            activities = []
-            trackpoints = []
+            # activities = []
+            # trackpoints = []
 
             has_labels = user in users_with_labels
 
@@ -147,11 +147,14 @@ class DBSetup:
 
 
 def main():
-    db_setup = DBSetup()
-    db_setup.delete_tables()
-    db_setup.create_tables()
-    db_setup.insert_data()
-    print(db_setup.db.list_collection_names())
+    inp = input("Are you sure you want to delete and setup all data? (y/n): ")
+    if inp.lower() == "y":
+        db_setup = DBSetup()
+        db_setup.delete_tables()
+        db_setup.create_tables()
+        db_setup.insert_data()
+    else:
+        print("Exiting...")
 
 
 if __name__ == "__main__":
