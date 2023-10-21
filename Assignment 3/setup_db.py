@@ -131,9 +131,9 @@ class DBSetup:
 
                     for line in lines:
                         line = line.strip().split(",")
-                        lat = line[0]
-                        lon = line[1]
-                        altitude = line[3]
+                        lat = float(line[0])
+                        lon = float(line[1])
+                        altitude = int(line[3])
                         date_time_raw = line[5] + " " + line[6]
                         date_time = dt.strptime(date_time_raw, date_format)
                         self.instert_trackpoint(

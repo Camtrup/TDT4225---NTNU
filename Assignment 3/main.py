@@ -11,12 +11,11 @@ client = MongoClient(uri, port)
 print("Connected to the database")
 
 db = client[db_name]
-print(db)
+
 # Send a ping to confirm a successful connectiontry:
 try:
-    print("Users:", db["User"].count_documents({}))
-    print("Activities:", db["Activity"].count_documents({}))
-    print("TrackPoints:", db["TrackPoint"].count_documents({}))
+    print("Ping:", db.command("ping"))
+
 
 except Exception as e:
     print("ERROR: Failed to connect to db:", e)

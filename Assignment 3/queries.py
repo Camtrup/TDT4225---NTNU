@@ -15,11 +15,11 @@ class Queries:
         print("Users:", self.db["User"].count_documents({}))
         print("Activities:", self.db["Activity"].count_documents({}))
 
-        print(
-            "TrackPoints:", self.db["TrackPoint"].count_documents({})
-        )  # This takes a long time to run
+    #    print(
+    #       "TrackPoints:", self.db["TrackPoint"].count_documents({})
+    #   )  # This takes a long time to run
 
-    ## Query 2: Find the average, minimum and maximum number of activities per user.
+    ## Query 2: Find the average number of activities per user
     def q2(self):
         a = self.db["User"].aggregate(
             [
@@ -38,47 +38,238 @@ class Queries:
                         "count": {"$size": "$activities"},
                     }
                 },
+                {"$group": {"_id": "null", "avg": {"$avg": "$count"}}},
+            ]
+        )
+
+        print("Average number of activities per user:", list(a)[0]["avg"])
+
+    ## Query 3: Find the top 20 users with the highest number of activities.
+    def q3(self):
+        a = self.db["User"].aggregate(
+            [
                 {
-                    "$group": {
-                        "_id": None,
-                        "avg": {"$avg": "$count"},
-                        "min": {"$min": "$count"},
-                        "max": {"$max": "$count"},
+                    "$lookup": {
+                        "from": "Activity",
+                        "localField": "_id",
+                        "foreignField": "user_id",
+                        "as": "activities",
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 1,
+                        "activities": 1,
+                        "count": {"$size": "$activities"},
+                    }
+                },
+                {"$sort": {"count": -1}},
+                {"$limit": 20},
+            ]
+        )
+        for i in a:
+            print(
+                "User",
+                i["_id"],
+                "has",
+                i["count"],
+                "activities",
+            )
+
+    ## Query 4: Find all users who have taken a taxi
+    def q4(self):
+        a = self.db["Activity"].aggregate(
+            [
+                {"$match": {"transportation_mode": "taxi"}},
+                {"$group": {"_id": "$user_id"}},
+            ]
+        )
+        for i in sorted(a, key=lambda x: x["_id"]):
+            print("User", i["_id"])
+
+    ## Query 5: Find all types of transportation modes and count how many activities that are tagged with these transportation mode labels. Do not count the rows where the mode is null.
+    def q5(self):
+        a = self.db["Activity"].aggregate(
+            [
+                {"$match": {"transportation_mode": {"$ne": "NULL"}}},
+                {"$group": {"_id": "$transportation_mode", "count": {"$sum": 1}}},
+            ]
+        )
+        for i in a:
+            print(i["_id"], i["count"])
+
+    ## Query 6:
+    # a) Find the year with the most activities.
+    # b) Is this also the year with most recorded hours?
+    def q6(self):
+        a = self.db["Activity"].aggregate(
+            [
+                {
+                    "$project": {
+                        "_id": 1,
+                        "user_id": 1,
+                        "transportation_mode": 1,
+                        "start_date_time": 1,
+                        "end_date_time": 1,
+                        "duration": {
+                            "$subtract": ["$end_date_time", "$start_date_time"]
+                        },
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 1,
+                        "user_id": 1,
+                        "transportation_mode": 1,
+                        "start_date_time": 1,
+                        "end_date_time": 1,
+                        "year": {"$year": "$start_date_time"},
+                        "duration": 1,
+                    }
+                },
+                {"$group": {"_id": "$year", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}},
+                {"$limit": 1},
+            ]
+        )
+        for i in a:
+            print("Year with most activities:", i["_id"])
+
+        b = self.db["Activity"].aggregate(
+            [
+                {
+                    "$project": {
+                        "_id": 1,
+                        "user_id": 1,
+                        "transportation_mode": 1,
+                        "start_date_time": 1,
+                        "end_date_time": 1,
+                        "duration": {
+                            "$subtract": ["$end_date_time", "$start_date_time"]
+                        },
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 1,
+                        "user_id": 1,
+                        "transportation_mode": 1,
+                        "start_date_time": 1,
+                        "end_date_time": 1,
+                        "year": {"$year": "$start_date_time"},
+                        "duration": 1,
+                    }
+                },
+                {"$group": {"_id": "$year", "count": {"$sum": "$duration"}}},
+                {"$sort": {"count": -1}},
+                {"$limit": 1},
+            ]
+        )
+        for i in b:
+            print("Year with most hours:", i["_id"])
+
+    # Query 7: Find the total distance (in km) walked in 2008, by user with id=112.
+    # use TrackPoint.date_time to determine if the activity is in 2008
+    def q7(self):
+        print("starting query")
+        a = self.db["Activity"].aggregate(
+            [
+                {
+                    "$match": {"user_id": "112", "transportation_mode": "walk"},
+                },
+                # Get all trackpoints for each activity
+                {
+                    "$lookup": {
+                        "from": "TrackPoint",
+                        "localField": "_id",
+                        "foreignField": "activity_id",
+                        "as": "trackpoints",
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 1,
+                        "user_id": 1,
+                        "transportation_mode": 1,
+                        "start_date_time": 1,
+                        "end_date_time": 1,
+                        "trackpoints": 1,
+                        "date_time": {"$year": "$start_date_time"},
                     }
                 },
             ]
         )
+
+        def get_distance(trackpoints):
+            distance = 0
+            for i in range(len(trackpoints) - 1):
+                distance += haversine(
+                    (trackpoints[i]["lat"], trackpoints[i]["lon"]),
+                    (trackpoints[i + 1]["lat"], trackpoints[i + 1]["lon"]),
+                    unit=Unit.KILOMETERS,
+                )
+            return distance
+
+        total_distance = 0
+
         for i in a:
-            print("Average:", i["avg"])
-            print("Minimum:", i["min"])
-            print("Maximum:", i["max"])
+            if i["date_time"] == 2008:
+                total_distance += get_distance(i["trackpoints"])
+            print(
+                "User",
+                i["user_id"],
+                "has walked",
+                get_distance(i["trackpoints"]),
+                "km in 2008",
+                i["date_time"],
+            )
+        print("Total distance walked in 2008:", total_distance, "km")
 
-    ## Query 3: Find the top 15 users having the largest number of activities.
-    def q3(self):
-        pass
-
-    ## Query 4: Find all users who have taken a bus
-    def q4(self):
-        pass
-
-    ## Query 5: List the top 10 users by their amount of different transportation modes
-    def q5(self):
-        pass
-
-    ## Query 6: Find activities that are registered multiple times. You should find the query even if it gives zero result.
-    def q6(self):
-        pass
-
-    # Query 7:
-    # a) Find the number of users that have started an activity in one day and ended the activity the next day.
-    # b) List the transportation mode, user id and duration for these activities.
-    def q7(self):
-        pass
-
-    # Query 8: Find the number of users which have been close to each other in time and space.
-    # Close is defined as the same space (50 meters) and for the same half minute (30seconds)
+    # Query 8: Find the top 20 users who have gained the most altitude meters.
+    # Output should be a field with (id, total meters gained per user).
+    # Remember that some altitude-values are invalid
+    # Tip: ∑ (𝑡𝑝 𝑛. 𝑎𝑙𝑡𝑖𝑡𝑢𝑑𝑒 − 𝑡𝑝 𝑛−1. 𝑎𝑙𝑡𝑖𝑡𝑢𝑑𝑒), 𝑡𝑝 𝑛. 𝑎𝑙𝑡𝑖𝑡𝑢𝑑𝑒 > tp 𝑛−1. 𝑎𝑙𝑡𝑖𝑡𝑢𝑑𝑒
     def q8(self):
-        pass
+        pipeline = [
+            {
+                "$lookup": {
+                    "from": "TrackPoint",
+                    "localField": "_id",
+                    "foreignField": "activity_id",
+                    "as": "trackpoints",
+                }
+            },
+            {"$unwind": "$trackpoints"},
+            {"$match": {"trackpoints.altitude": {"$ne": -777}}},
+            {
+                "$group": {
+                    "_id": "$user_id",
+                    "total_altitude_gained": {
+                        "$sum": {
+                            "$cond": [
+                                {"$eq": ["$trackpoints.altitude", "-777"]},
+                                0,
+                                {
+                                    "$subtract": [
+                                        {"$toDouble": "$trackpoints.altitude"},
+                                        0.0,
+                                    ]
+                                },
+                            ]
+                        }
+                    },
+                }
+            },
+            {"$sort": {"total_altitude_gained": -1}},
+            {"$limit": 20},
+        ]
+
+        # Execute the aggregation
+        result = list(self.db["Activity"].aggregate(pipeline))
+
+        print("Top 20 users who have gained the most altitude meters:")
+        for i in result:
+            print("User", i["_id"], "has gained", i["total_altitude_gained"], "meters")
 
     # Query 9: Find the top 15 users who have gained the most altitude meters.
     # Invalid altitude values must be ignored. They are represented as -777 in the database.
@@ -124,7 +315,7 @@ def main():
         print("\n\nQuery 6:")
         q.q6()
         print("\n\nQuery 7:")
-        q.q7()
+        #  q.q7()
         print("\n\nQuery 8:")
         q.q8()
         print("\n\nQuery 9:")
