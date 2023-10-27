@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from DbConnector import DbConnector
 from haversine import Unit, haversine
+from datetime import datetime
 
 
 class Queries:
@@ -15,9 +16,9 @@ class Queries:
         print("Users:", self.db["User"].count_documents({}))
         print("Activities:", self.db["Activity"].count_documents({}))
 
-    #    print(
-    #       "TrackPoints:", self.db["TrackPoint"].count_documents({})
-    #   )  # This takes a long time to run
+        print(
+            "TrackPoints:", self.db["TrackPoint"].count_documents({})
+        )  # This takes a long time to run
 
     ## Query 2: Find the average number of activities per user
     def q2(self):
@@ -171,59 +172,29 @@ class Queries:
     # Query 7: Find the total distance (in km) walked in 2008, by user with id=112.
     # use TrackPoint.date_time to determine if the activity is in 2008
     def q7(self):
-        print("starting query")
-        a = self.db["Activity"].aggregate(
-            [
-                {
-                    "$match": {"user_id": "112", "transportation_mode": "walk"},
-                },
-                # Get all trackpoints for each activity
-                {
-                    "$lookup": {
-                        "from": "TrackPoint",
-                        "localField": "_id",
-                        "foreignField": "activity_id",
-                        "as": "trackpoints",
-                    }
-                },
-                {
-                    "$project": {
-                        "_id": 1,
-                        "user_id": 1,
-                        "transportation_mode": 1,
-                        "start_date_time": 1,
-                        "end_date_time": 1,
-                        "trackpoints": 1,
-                        "date_time": {"$year": "$start_date_time"},
-                    }
-                },
-            ]
-        )
+        activity_query = {
+            'user_id': "112",
+            "transportation_mode": "walk",
+        }
 
-        def get_distance(trackpoints):
-            distance = 0
-            for i in range(len(trackpoints) - 1):
-                distance += haversine(
-                    (trackpoints[i]["lat"], trackpoints[i]["lon"]),
-                    (trackpoints[i + 1]["lat"], trackpoints[i + 1]["lon"]),
-                    unit=Unit.KILOMETERS,
-                )
-            return distance
+        activities = self.db["Activity"]
+        trackpoints = self.db["TrackPoint"]
 
-        total_distance = 0
+        distance = 0
+        prev = None
+        for activity in activities.find(activity_query):
+            for trackpoint in trackpoints.find({"activity_id": activity["_id"]}):
+                if trackpoint["date_time"].year == 2008:
+                    if prev:
+                        distance += haversine(
+                            (prev["lat"], prev["lon"]),
+                            (trackpoint["lat"], trackpoint["lon"]),
+                            unit=Unit.KILOMETERS,
+                        )
+                    prev = trackpoint
+        print("Total distance walked in 2008 by user 112:", distance)
 
-        for i in a:
-            if i["date_time"] == 2008:
-                total_distance += get_distance(i["trackpoints"])
-            print(
-                "User",
-                i["user_id"],
-                "has walked",
-                get_distance(i["trackpoints"]),
-                "km in 2008",
-                i["date_time"],
-            )
-        print("Total distance walked in 2008:", total_distance, "km")
+
 
     # Query 8: Find the top 20 users who have gained the most altitude meters.
     # Output should be a field with (id, total meters gained per user).
@@ -232,37 +203,37 @@ class Queries:
     def q8(self):
         pipeline = [
             {
+                "$match": {
+                    "trackpoints.altitude": { "$ne": -777 }
+                }
+            },
+            {
                 "$lookup": {
                     "from": "TrackPoint",
                     "localField": "_id",
                     "foreignField": "activity_id",
-                    "as": "trackpoints",
+                    "as": "trackpoints"
                 }
             },
-            {"$unwind": "$trackpoints"},
-            {"$match": {"trackpoints.altitude": {"$ne": -777}}},
+            { "$unwind": "$trackpoints" },
             {
                 "$group": {
                     "_id": "$user_id",
                     "total_altitude_gained": {
                         "$sum": {
                             "$cond": [
-                                {"$eq": ["$trackpoints.altitude", "-777"]},
+                                { "$eq": ["$trackpoints.altitude", -777] },
                                 0,
-                                {
-                                    "$subtract": [
-                                        {"$toDouble": "$trackpoints.altitude"},
-                                        0.0,
-                                    ]
-                                },
+                                { "$subtract": [{ "$toDouble": "$trackpoints.altitude" }, 0.0] }
                             ]
                         }
-                    },
+                    }
                 }
             },
-            {"$sort": {"total_altitude_gained": -1}},
-            {"$limit": 20},
-        ]
+            { "$sort": { "total_altitude_gained": -1 } },
+            { "$limit": 20 }
+        ];
+
 
         # Execute the aggregation
         result = list(self.db["Activity"].aggregate(pipeline))
@@ -271,61 +242,161 @@ class Queries:
         for i in result:
             print("User", i["_id"], "has gained", i["total_altitude_gained"], "meters")
 
-    # Query 9: Find the top 15 users who have gained the most altitude meters.
-    # Invalid altitude values must be ignored. They are represented as -777 in the database.
+    # Query 9: Find all users who have invalid activities, and the number of invalid activities
+    # per user
     def q9(self):
-        pass
+        users = [x['_id'] for x in self.db["User"].find({}, {'_id': '$_id'})]
+        users_with_invalid_activities = []
+        for user in users:
+            count = 0
+            activities = [
+                x['_id'] for x in self.db["Activity"].find({'user_id': user}, {'_id': '$_id'})]
+            for activity in activities:
+                try:
+                    trackpoint_dates = [x['date_time'] for x in self.db["TrackPoint"].find(
+                        {'activity_id': activity}, {'date_time': '$date_time'})]
+                    for i in range(len(trackpoint_dates) - 1):
+                        if (trackpoint_dates[i+1] - trackpoint_dates[i]).total_seconds() > 5 * 60:
+                            raise StopIteration()
+                except StopIteration as e:
+                    count += 1
+            if count > 0:
+                users_with_invalid_activities.append([user, count])
 
-    # Query 10: Find the users that have traveled the longest total distance in one day for each
-    # transportation mode.
+        users_with_invalid_activities.sort(
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        print("Users with invalid activities:")
+        for user in users_with_invalid_activities:
+            print("User", user[0], "has", user[1], "invalid activities")
+
+
+
+    # Find the users who have tracked an activity in the Forbidden City of Beijing.
+    # In this question you can consider the Forbidden City to have
+    # coordinates that correspond to: lat 39.916, lon 116.397.
     def q10(self):
-        pass
+        activities = self.db["Activity"].aggregate([
+            {
+                '$lookup': {
+                    'from': 'TrackPoint',
+                    'localField': '_id',
+                    'foreignField': 'activity_id',
+                    'as': 'trackpoints'
+                }
+            },
+            {
+                '$match': {
+                    'trackpoints.lat': "39.916",
+                    'trackpoints.lon': "116.397"
+                }
+            },
+            {
+                '$project': {
+                    '_id': 0,
+                    'user_id': 1
+                }
+            }
+        ])
+        users = [x['user_id'] for x in activities]
+        users = list(set(users))
+        print("Users who have tracked an activity in the Forbidden City of Beijing:")
+        for user in users:
+            print("User", user)
 
-    # Query 11: Find all users who have invalid activities, and the number of invalid activities per user.
-    # An invalid activity is an activity with consecutive trackpoints where the timestamps deviate with
-    # at least 5 minutes.
-    def q11(self):
-        pass
+                
 
-    # Query 12: Find all users who have registered transportation_mode and their most used
-    # transportation_mode. The answer should be on format (user_id,
+    #  Find all users who have registered transportation_mode and their most used
+    # transportation_mode.
+    # The answer should be on format (user_id,
     # most_used_transportation_mode) sorted on user_id.
-    # Some users may have the same number of activities tagged with e.g. walk
-    # and car. In this case it is up to you to decide which transportation mode
-    # to include in your answer (choose one).
+    # Some users may have the same number of activities tagged with e.g.
+    # walk and car. In this case it is up to you to decide which transportation
+    # mode to include in your answer (choose one).
     # Do not count the rows where the mode is null.
-    def q12(self):
-        pass
+    def q11(self):
+        users = self.db["User"].find({'has_labels': True}, {'_id': True})
+        transportation = self.db["Activity"].aggregate([
+            {
+                '$match': {
+                    'user_id': {
+                        '$in': [x['_id'] for x in users]
+                    },
+                    'transportation_mode': {
+                        '$ne': 'NULL'
+                    }
+                }
+            },
+            {
+                '$group': {
+                    '_id': {
+                        'transportation_mode': '$transportation_mode',
+                        'user_id': '$user_id'
+                    },
+                    'count': {
+                        '$count': {}
+                    },
+                }
+            },
+            {
+                '$sort': {
+                    '_id.user_id': -1,
+                }
+            },
+            {
+                '$project': {
+                    '_id': 0,
+                    'transportation_mode': '$_id.transportation_mode',
+                    'user_id': '$_id.user_id',
+                    'count': '$count'
+                }
+            }
+        ])
+        result = {}
+        for i in transportation:
+            user = i['user_id']
+            if user not in result:
+                result[user] = [i['transportation_mode'], i['count']]
+            else:
+                if i['count'] > result[user][1]:
+                    result[user] = [i['transportation_mode'], i['count']]
+        result = [[k, v[0], v[1]] for k, v in result.items()]
+        result.sort(key=lambda x: x[2], reverse=True)
+        print("Users who have registered transportation_mode and their most used transportation_mode:")
+
+        for i in result:
+            print("User", i[0], "has most used transportation_mode", i[1])
+
 
 
 def main():
     q = None
     try:
         q = Queries()
-        print("\n\nQuery 1:")
-        q.q1()
-        print("\n\nQuery 2:")
-        q.q2()
-        print("\n\nQuery 3:")
-        q.q3()
-        print("\n\nQuery 4:")
-        q.q4()
-        print("\n\nQuery 5:")
-        q.q5()
-        print("\n\nQuery 6:")
-        q.q6()
-        print("\n\nQuery 7:")
-        #  q.q7()
-        print("\n\nQuery 8:")
-        q.q8()
-        print("\n\nQuery 9:")
-        q.q9()
+        # print("\n\nQuery 1:")
+        # q.q1()
+        # print("\n\nQuery 2:")
+        # q.q2()
+        # print("\n\nQuery 3:")
+        # q.q3()
+        # print("\n\nQuery 4:")
+        # q.q4()
+        # print("\n\nQuery 5:")
+        # q.q5()
+        # print("\n\nQuery 6:")
+        # q.q6()
+        # print("\n\nQuery 7:")
+        # q.q7()
+        # print("\n\nQuery 8:")
+        # q.q8()
+        # print("\n\nQuery 9:")
+        # q.q9()
         print("\n\nQuery 10:")
         q.q10()
         print("\n\nQuery 11:")
         q.q11()
-        print("\n\nQuery 12:")
-        q.q12()
 
     except Exception as e:
         print("Error: ", e)
